@@ -12,14 +12,11 @@ target_sources(
         ${CMAKE_CURRENT_LIST_DIR}/src/usb_midi.c
 )
 
+#   everything TinyUSB-related arrives through light_usb_common, which is where tinyusb_board is
+# linked on a PICO_SDK target build. A PICO_SDK block here used to follow, calling
+# target_link_libraries() with an empty library list -- valid CMake that does nothing, and easy
+# to mistake for a place something belongs.
 target_link_libraries(
         light_usb_midi INTERFACE
         light_usb_common
 )
-
-if(LIGHT_SYSTEM STREQUAL PICO_SDK)
-        target_link_libraries(
-                light_usb_midi INTERFACE
-                
-        )
-endif()
