@@ -42,3 +42,43 @@ if(LIGHT_SYSTEM STREQUAL PICO_SDK AND LIGHT_PLATFORM STREQUAL TARGET)
                 tinyusb_board
         )
 endif()
+
+#   BARE CMSIS: no SDK to hand us the stack, so it is compiled here from the checkout the
+# container resolved. The container also chose the OPT_MCU and the portable driver for this chip
+# -- see the comment there for why that mapping is not the framework's business.
+#
+#   tinyusb_sources_get() rather than a list of our own: TinyUSB maintains that list, and a copy
+# here would rot silently as classes are added. It deliberately excludes the DCD and HCD drivers,
+# which is why the port files are named separately -- the device controller is added here and the
+# host controller by light_usbhost, mirroring how the Pico SDK splits tinyusb_board from
+# tinyusb_host.
+#
+#   the include() is confined to THIS directory's scope deliberately: TinyUSB's src/CMakeLists.txt
+# opens with cmake_minimum_required(VERSION 3.20), which raises policy settings wherever it lands.
+# Including it from the container would apply that to every module below it.
+if(LIGHT_SYSTEM STREQUAL CMSIS AND LIGHT_PLATFORM STREQUAL TARGET)
+        include(${TINYUSB_PATH}/src/CMakeLists.txt)
+        tinyusb_sources_get(_tu_src)
+
+        foreach(_f IN LISTS LIGHT_USB_TU_DCD)
+                list(APPEND _tu_src ${LIGHT_USB_TU_PORT}/${_f})
+        endforeach()
+
+        #   plus the clock TinyUSB asks the port for. It declares tusb_time_millis_api() and
+        # tusb_time_delay_ms_api() and defines neither; the Pico SDK's integration answers them
+        # on that path, so nothing here needed to until CMSIS did.
+        list(APPEND _tu_src ${CMAKE_CURRENT_LIST_DIR}/src/portable/cmsis/tusb_time.c)
+
+        target_sources(light_usb_common INTERFACE ${_tu_src})
+
+        #   src/ for <tusb.h> and friends. The CMSIS device header the port driver needs
+        # (stm32h7xx.h, and the part define that header insists on) already arrives through
+        # light_core, which links the selected chip port -- so none of the vendor header wiring
+        # is repeated here.
+        target_include_directories(light_usb_common INTERFACE ${TINYUSB_PATH}/src)
+
+        #   CFG_TUSB_MCU is what selects the port inside TinyUSB's own headers. Undefined, it
+        # fails with a message naming itself; set to the WRONG value it compiles and fails at
+        # link on missing dcd_* symbols, naming nothing that leads back to the chip.
+        target_compile_definitions(light_usb_common INTERFACE CFG_TUSB_MCU=${LIGHT_USB_TU_MCU})
+endif()

@@ -37,6 +37,53 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         add_subdirectory(${LIGHT_PATH} light_framework)
 endif()
 
+#   WHERE THE USB STACK COMES FROM, resolved once here so every module below agrees.
+#
+#   ON A PICO TARGET the Pico SDK vendors TinyUSB at lib/tinyusb and exposes it as CMake targets
+# (tinyusb_board, tinyusb_host). Using anything else there would mean two copies of the stack in
+# one binary, so the SDK's copy wins and there is nothing to resolve.
+#
+#   ON BARE CMSIS there is no SDK to provide it, so the stack is compiled from a checkout of its
+# own -- found the same way every other dependency is: an explicit TINYUSB_PATH, the environment,
+# then a sibling ../tinyusb. MARKER is src/tusb.h because TinyUSB has no top-level CMakeLists.txt,
+# so the default marker would never match even on a correct checkout.
+#
+#   the chip mapping lives here rather than in the framework: which OPT_MCU and which portable
+# driver a part needs is TinyUSB's business, and teaching light_core_chip_* about it would put
+# USB knowledge in ports that have no USB code.
+if(LIGHT_SYSTEM STREQUAL CMSIS AND LIGHT_PLATFORM STREQUAL TARGET)
+        light_resolve_project(TINYUSB tinyusb MARKER src/tusb.h)
+
+        #   ST splits across two unrelated device controllers, so this is a real fork rather than
+        # a naming difference: F4 and H7 carry the Synopsys DWC2 core, while F102/F103 have ST's
+        # own "fsdev" full-speed device. Picking the wrong one compiles and fails at link with
+        # missing dcd_* symbols, naming nothing that leads back to the chip.
+        if(LIGHT_CHIP STREQUAL stm32h743)
+                set(LIGHT_USB_TU_MCU  OPT_MCU_STM32H7)
+                set(LIGHT_USB_TU_PORT ${TINYUSB_PATH}/src/portable/synopsys/dwc2)
+                set(LIGHT_USB_TU_DCD  dwc2_common.c dcd_dwc2.c)
+                set(LIGHT_USB_TU_HCD  hcd_dwc2.c)
+        elseif(LIGHT_CHIP STREQUAL stm32f411)
+                set(LIGHT_USB_TU_MCU  OPT_MCU_STM32F4)
+                set(LIGHT_USB_TU_PORT ${TINYUSB_PATH}/src/portable/synopsys/dwc2)
+                set(LIGHT_USB_TU_DCD  dwc2_common.c dcd_dwc2.c)
+                set(LIGHT_USB_TU_HCD  hcd_dwc2.c)
+        elseif(LIGHT_CHIP STREQUAL stm32f103)
+                set(LIGHT_USB_TU_MCU  OPT_MCU_STM32F1)
+                set(LIGHT_USB_TU_PORT ${TINYUSB_PATH}/src/portable/st/stm32_fsdev)
+                set(LIGHT_USB_TU_DCD  fsdev_common.c dcd_stm32_fsdev.c)
+                set(LIGHT_USB_TU_HCD  hcd_stm32_fsdev.c)
+        else()
+                message(FATAL_ERROR
+                        "light_usb has no TinyUSB port mapping for LIGHT_CHIP='${LIGHT_CHIP}'.\n"
+                        "Supported on CMSIS: stm32h743, stm32f411 (Synopsys DWC2), stm32f103 (ST fsdev).\n"
+                        "Adding one means naming its CFG_TUSB_MCU and portable driver in "
+                        "${CMAKE_CURRENT_LIST_FILE}.")
+        endif()
+
+        light_info("light_usb: TinyUSB from ${TINYUSB_PATH} (${LIGHT_USB_TU_MCU})")
+endif()
+
 #   EVERY module, unconditionally. All four are INTERFACE libraries: they contribute no sources
 # and compile nothing until a target links them, so a consumer wanting only the MIDI device class
 # pays nothing for the host stack. Same argument the framework makes for its chip ports.
@@ -49,3 +96,14 @@ add_subdirectory(module/light_usb)
 add_subdirectory(module/light_usb_midi)
 add_subdirectory(module/light_usbhost)
 add_subdirectory(module/light_usbhost_midi)
+
+#   the CMSIS link check, and it only exists standalone. A consuming project adds this file as a
+# subdirectory and does not want a stray executable in its build; but when this project IS the
+# build, an executable is the only way any of the above gets compiled at all.
+#
+#   guarded on CMSIS/TARGET because that is the path with no other consumer: the Pico SDK path is
+# exercised every time crossfire builds, while nothing linked these modules on CMSIS before.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR
+                AND LIGHT_SYSTEM STREQUAL CMSIS AND LIGHT_PLATFORM STREQUAL TARGET)
+        add_subdirectory(test/usb_link_check)
+endif()
