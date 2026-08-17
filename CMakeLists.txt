@@ -58,26 +58,49 @@ if(LIGHT_SYSTEM STREQUAL CMSIS AND LIGHT_PLATFORM STREQUAL TARGET)
         # a naming difference: F4 and H7 carry the Synopsys DWC2 core, while F102/F103 have ST's
         # own "fsdev" full-speed device. Picking the wrong one compiles and fails at link with
         # missing dcd_* symbols, naming nothing that leads back to the chip.
+#   LIGHT_USB_PLATFORM_SRC is this project's own bring-up for the part -- clocks, pins,
+        # transceiver supply, interrupt -- which is separate from choosing TinyUSB's driver.
+        # A chip can have a perfectly good TinyUSB port and still have no bring-up written, and
+        # that combination builds, links, and does nothing at all on hardware. So a chip without
+        # one is refused rather than quietly produced.
         if(LIGHT_CHIP STREQUAL stm32h743)
                 set(LIGHT_USB_TU_MCU  OPT_MCU_STM32H7)
                 set(LIGHT_USB_TU_PORT ${TINYUSB_PATH}/src/portable/synopsys/dwc2)
                 set(LIGHT_USB_TU_DCD  dwc2_common.c dcd_dwc2.c)
                 set(LIGHT_USB_TU_HCD  hcd_dwc2.c)
+                set(LIGHT_USB_PLATFORM_SRC src/portable/cmsis/usb_stm32h7.c)
         elseif(LIGHT_CHIP STREQUAL stm32f411)
                 set(LIGHT_USB_TU_MCU  OPT_MCU_STM32F4)
                 set(LIGHT_USB_TU_PORT ${TINYUSB_PATH}/src/portable/synopsys/dwc2)
                 set(LIGHT_USB_TU_DCD  dwc2_common.c dcd_dwc2.c)
                 set(LIGHT_USB_TU_HCD  hcd_dwc2.c)
+                #   the F411 carries the same DWC2 core, so TinyUSB needs nothing new -- but its
+                # clock tree and supply differ enough (no dedicated USB regulator, 48MHz from
+                # PLL Q rather than HSI48) that the H7 sequence would not bring it up
+                set(LIGHT_USB_PLATFORM_SRC "")
         elseif(LIGHT_CHIP STREQUAL stm32f103)
                 set(LIGHT_USB_TU_MCU  OPT_MCU_STM32F1)
                 set(LIGHT_USB_TU_PORT ${TINYUSB_PATH}/src/portable/st/stm32_fsdev)
                 set(LIGHT_USB_TU_DCD  fsdev_common.c dcd_stm32_fsdev.c)
                 set(LIGHT_USB_TU_HCD  hcd_stm32_fsdev.c)
+                set(LIGHT_USB_PLATFORM_SRC "")
         else()
                 message(FATAL_ERROR
                         "light_usb has no TinyUSB port mapping for LIGHT_CHIP='${LIGHT_CHIP}'.\n"
                         "Supported on CMSIS: stm32h743, stm32f411 (Synopsys DWC2), stm32f103 (ST fsdev).\n"
                         "Adding one means naming its CFG_TUSB_MCU and portable driver in "
+                        "${CMAKE_CURRENT_LIST_FILE}.")
+        endif()
+
+        if(NOT LIGHT_USB_PLATFORM_SRC)
+                message(FATAL_ERROR
+                        "light_usb has a TinyUSB port for LIGHT_CHIP='${LIGHT_CHIP}' but no bring-up "
+                        "for it: nothing would enable the USB clocks, configure the pins, power the "
+                        "transceiver or route the interrupt.\n"
+                        "That combination compiles and links and does nothing on hardware, which is "
+                        "why it is refused here rather than built.\n"
+                        "Implemented so far: stm32h743. Adding one means a src/portable/cmsis/ file "
+                        "defining light_usb_platform_init(), and naming it in "
                         "${CMAKE_CURRENT_LIST_FILE}.")
         endif()
 

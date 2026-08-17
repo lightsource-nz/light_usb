@@ -69,7 +69,15 @@ if(LIGHT_SYSTEM STREQUAL CMSIS AND LIGHT_PLATFORM STREQUAL TARGET)
         # on that path, so nothing here needed to until CMSIS did.
         list(APPEND _tu_src ${CMAKE_CURRENT_LIST_DIR}/src/portable/cmsis/tusb_time.c)
 
+        #   and this chip's bring-up -- clocks, pins, transceiver supply, interrupt. The container
+        # selected it and refuses to configure a chip that has none, so it is always set here.
+        list(APPEND _tu_src ${CMAKE_CURRENT_LIST_DIR}/${LIGHT_USB_PLATFORM_SRC})
+
         target_sources(light_usb_common INTERFACE ${_tu_src})
+
+        #   tells usb.c that light_usb_init() must do the bring-up itself. The Pico path has no
+        # equivalent flag on purpose: there, TinyUSB's BSP does it and the application calls it
+        target_compile_definitions(light_usb_common INTERFACE LIGHT_USB_PORT_CMSIS)
 
         #   src/ for <tusb.h> and friends. The CMSIS device header the port driver needs
         # (stm32h7xx.h, and the part define that header insists on) already arrives through

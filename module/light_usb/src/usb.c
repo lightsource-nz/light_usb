@@ -16,11 +16,32 @@
 
 static struct light_usb_port _native_port[LIGHT_USB_NATIVE_PORT_COUNT];
 
+//   the bare-CMSIS bring-up: clocks, pins, transceiver supply and the USB interrupt, none of
+// which exists without a BSP. Implemented per chip under src/portable/cmsis/ and selected by
+// the container's CMakeLists, which refuses to configure a chip it has no port for.
+#ifdef LIGHT_USB_PORT_CMSIS
+extern void light_usb_platform_init(void);
+#endif
+
 void light_usb_init()
 {
+        //   NOTE __HAVE_TINYUSB IS DEFINED NOWHERE -- not in any CMakeLists, cmake module or
+        // header in this project, the framework, or crossfire. So this branch has never been
+        // compiled, on any platform, and board_init() has never been called from here.
+        //   it is inert rather than broken: crossfire calls board_init() itself during its own
+        // startup, so the Pico path has always been initialised, just not through this function.
+        // Left exactly as-is deliberately -- defining the macro now would call board_init() a
+        // second time on a path that is working and hardware-verified.
 #ifdef __HAVE_TINYUSB
         board_init();
 #endif
+
+        //   CMSIS has no such fallback: nothing else sets the USB peripheral up, so this call
+        // is the only bring-up there is
+#ifdef LIGHT_USB_PORT_CMSIS
+        light_usb_platform_init();
+#endif
+
         for(uint8_t i = 0; i < LIGHT_USB_NATIVE_PORT_COUNT; i++) {
 
         }
