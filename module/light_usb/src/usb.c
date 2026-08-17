@@ -1,7 +1,14 @@
 #include <light_usb.h>
 
-#ifdef __HAVE_TINYUSB
+//   guarded on the port flags the build sets, not on __HAVE_TINYUSB, which is defined nowhere --
+// so this include block had never been compiled either, and board_init() below resolved only
+// because the consumer pulled bsp/board.h in through light_usbhost_midi.h
+#ifdef LIGHT_USB_PORT_PICO
 #include "bsp/board.h"
+#include "tusb.h"
+#endif
+#ifdef LIGHT_USB_PORT_CMSIS
+// no BSP on bare CMSIS; the bring-up in src/portable/cmsis/ replaces it
 #include "tusb.h"
 #endif
 
@@ -25,14 +32,14 @@ extern void light_usb_platform_init(void);
 
 void light_usb_init()
 {
-        //   NOTE __HAVE_TINYUSB IS DEFINED NOWHERE -- not in any CMakeLists, cmake module or
-        // header in this project, the framework, or crossfire. So this branch has never been
-        // compiled, on any platform, and board_init() has never been called from here.
-        //   it is inert rather than broken: crossfire calls board_init() itself during its own
-        // startup, so the Pico path has always been initialised, just not through this function.
-        // Left exactly as-is deliberately -- defining the macro now would call board_init() a
-        // second time on a path that is working and hardware-verified.
-#ifdef __HAVE_TINYUSB
+        //   the Pico path: TinyUSB's BSP, which the SDK supplies. This used to be guarded on
+        // __HAVE_TINYUSB -- a macro defined in no CMakeLists, cmake module or header anywhere in
+        // these repositories, so the branch had never compiled on any platform and board_init()
+        // was never called from here. It was inert rather than broken only because crossfire
+        // called board_init() itself.
+        //   now that this function is the portable entry point, the call belongs here and the
+        // consumer's direct call goes away -- so board_init() still happens exactly once.
+#ifdef LIGHT_USB_PORT_PICO
         board_init();
 #endif
 

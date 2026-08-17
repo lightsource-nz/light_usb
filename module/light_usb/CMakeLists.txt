@@ -41,6 +41,9 @@ if(LIGHT_SYSTEM STREQUAL PICO_SDK AND LIGHT_PLATFORM STREQUAL TARGET)
                 light_usb_common INTERFACE
                 tinyusb_board
         )
+        #   tells usb.c that light_usb_init() brings the stack up by calling TinyUSB's BSP.
+        # Replaces __HAVE_TINYUSB, which no build ever defined
+        target_compile_definitions(light_usb_common INTERFACE LIGHT_USB_PORT_PICO)
 endif()
 
 #   BARE CMSIS: no SDK to hand us the stack, so it is compiled here from the checkout the
