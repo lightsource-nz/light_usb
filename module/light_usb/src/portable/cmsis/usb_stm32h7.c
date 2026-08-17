@@ -50,21 +50,59 @@ static void _gpio_set_af(GPIO_TypeDef *port, uint32_t pin, uint32_t af)
         *afr |= (af << ((pin & 7u) * 4u));
 }
 
+//   spin on a hardware ready flag, but never forever.
+//
+//   AN UNBOUNDED WAIT HERE IS THE WRONG FAILURE. The first version of this file polled
+// USB33RDY with a bare `while(!ready) {}`, and on the WeAct MiniSTM32H7xx that bit never
+// asserts -- so the board did not "fail to bring up USB", it hung inside init before enabling
+// the peripheral clock, and every OTG register read back as zero. From the outside that is
+// indistinguishable from a dead board, and it took halting the CPU over SWD to see that the PC
+// was sitting six bytes inside this function.
+//   returns whether the flag arrived, so the caller can say so and carry on.
+static bool _wait_ready(volatile uint32_t *reg, uint32_t mask, uint32_t spins)
+{
+        while(spins--) {
+                if(*reg & mask)
+                        return true;
+        }
+        return false;
+}
+
+//   a loop count rather than milliseconds: this runs before the USB clock is up and is called
+// from init, where leaning on a timebase is more assumption than it is worth. Order-of-magnitude
+// is all that is wanted -- long enough for a supply to settle, short enough not to look hung.
+#define USB_READY_SPINS         1000000u
+
 void light_usb_platform_init(void)
 {
-        //   1. the transceiver supply. The USB cell runs from a dedicated 3.3V regulator that is
-        // OFF at reset; without it the core's registers read back plausibly and no traffic ever
-        // appears on the wire. USB33RDY is polled rather than assumed because the regulator
-        // takes time to come up and the DWC2 core reset that follows would otherwise run against
-        // an unpowered PHY.
-        PWR->CR3 |= PWR_CR3_USBREGEN;
-        while(!(PWR->CR3 & PWR_CR3_USB33RDY)) { }
+        //   1. the transceiver supply.
+        //
+        //   THE VOLTAGE DETECTOR, NOT THE REGULATOR. USBREGEN enables the internal 3.3V USB
+        // regulator, which is for boards that feed VDD33USB from VDD50USB through the chip. This
+        // board supplies VDD33USB externally, so that regulator has nothing to do and USB33RDY
+        // never asserts -- measured on hardware: PWR_CR3 read back 0x02000042, USBREGEN set and
+        // USB33RDY clear, permanently.
+        //   USB33DEN enables the level detector instead, which is what TinyUSB's own
+        // hw/bsp/stm32h7 does -- and its comment notes board init works even without it. So a
+        // detector that never reports ready is a warning, not a reason to stop.
+        PWR->CR3 |= PWR_CR3_USB33DEN;
+        if(!_wait_ready(&PWR->CR3, PWR_CR3_USB33RDY, USB_READY_SPINS)) {
+                light_warn("usb: VDD33USB not reported ready (PWR_CR3=0x%x); continuing",
+                                                (unsigned) PWR->CR3);
+        }
 
         //   2. a 48MHz reference. HSI48 rather than PLL3Q: it needs no PLL configuration, and it
         // leaves the board's own clock tree alone -- this file has no business reconfiguring
         // PLLs that light_core's chip port already set up for the CPU and peripherals.
         RCC->CR |= RCC_CR_HSI48ON;
-        while(!(RCC->CR & RCC_CR_HSI48RDY)) { }
+        if(!_wait_ready(&RCC->CR, RCC_CR_HSI48RDY, USB_READY_SPINS)) {
+                //   fatal in a way the supply is not: with no 48MHz reference the core cannot
+                // clock the bus at all, so continuing would present as a silent absence of
+                // traffic rather than as this
+                light_error("usb: HSI48 did not start (RCC_CR=0x%x); USB will not function",
+                                                (unsigned) RCC->CR);
+                return;
+        }
         RCC->D2CCIP2R &= ~RCC_D2CCIP2R_USBSEL;
         RCC->D2CCIP2R |= (3u << RCC_D2CCIP2R_USBSEL_Pos);   // 3 = HSI48
 
