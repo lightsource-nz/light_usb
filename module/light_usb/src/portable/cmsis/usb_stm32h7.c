@@ -91,20 +91,35 @@ void light_usb_platform_init(void)
                                                 (unsigned) PWR->CR3);
         }
 
-        //   2. a 48MHz reference. HSI48 rather than PLL3Q: it needs no PLL configuration, and it
-        // leaves the board's own clock tree alone -- this file has no business reconfiguring
-        // PLLs that light_core's chip port already set up for the CPU and peripherals.
-        RCC->CR |= RCC_CR_HSI48ON;
-        if(!_wait_ready(&RCC->CR, RCC_CR_HSI48RDY, USB_READY_SPINS)) {
-                //   fatal in a way the supply is not: with no 48MHz reference the core cannot
-                // clock the bus at all, so continuing would present as a silent absence of
-                // traffic rather than as this
-                light_error("usb: HSI48 did not start (RCC_CR=0x%x); USB will not function",
-                                                (unsigned) RCC->CR);
-                return;
+        //   2. a 48MHz reference, and WHICH ONE MATTERS MORE THAN IT LOOKS.
+        //
+        //   PLL3Q, derived from the board's crystal, is used when the chip port has provided it.
+        // A USB host must hold its SOF interval to roughly +/-500ppm. HSI48 is an RC oscillator
+        // specified around +/-1%, so it is about an order of magnitude outside that -- and CRS,
+        // which is ST's usual answer for HSI48 accuracy, cannot help: it trims against incoming
+        // SOF packets, and a host generates those rather than receiving them.
+        //   devices are tolerant enough that HSI48 enumerates at room temperature, which is
+        // precisely what makes it a bad default: it works on the bench and drifts in the field.
+        if(RCC->CR & RCC_CR_PLL3RDY) {
+                RCC->D2CCIP2R = (RCC->D2CCIP2R & ~RCC_D2CCIP2R_USBSEL)
+                                | (2u << RCC_D2CCIP2R_USBSEL_Pos);      // 2 = pll3_q_ck
+        } else {
+                //   HSI48 as the fallback, so a board with no crystal still enumerates rather
+                // than not working at all -- but say so, because the difference is invisible
+                // until something marginal happens
+                light_warn("usb: no PLL3 48MHz reference; falling back to HSI48, which is outside USB host tolerance");
+                RCC->CR |= RCC_CR_HSI48ON;
+                if(!_wait_ready(&RCC->CR, RCC_CR_HSI48RDY, USB_READY_SPINS)) {
+                        //   fatal in a way the supply is not: with no 48MHz reference at all the
+                        // core cannot clock the bus, so continuing would present as a silent
+                        // absence of traffic rather than as this
+                        light_error("usb: HSI48 did not start (RCC_CR=0x%x); USB will not function",
+                                                        (unsigned) RCC->CR);
+                        return;
+                }
+                RCC->D2CCIP2R = (RCC->D2CCIP2R & ~RCC_D2CCIP2R_USBSEL)
+                                | (3u << RCC_D2CCIP2R_USBSEL_Pos);      // 3 = hsi48_ck
         }
-        RCC->D2CCIP2R &= ~RCC_D2CCIP2R_USBSEL;
-        RCC->D2CCIP2R |= (3u << RCC_D2CCIP2R_USBSEL_Pos);   // 3 = HSI48
 
         //   3. the pins, before the peripheral clock: the core samples the line state as it comes
         // out of reset, so pins still in their default analog mode at that moment give it a
