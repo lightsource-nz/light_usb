@@ -15,11 +15,10 @@
  *  this, so a clock that disagrees with the one the application schedules against produces
  *  timeouts that appear to be device faults.
  */
-//   light.h FIRST: light_platform.h is not self-contained -- it uses light_task_t without
-// declaring it, so including it alone fails with "unknown type name 'light_task_t'". Every other
-// caller in the tree happens to reach it through a header that pulled light.h in already.
+//   light.h is the whole framework surface: it pulls in light_platform.h, which is where
+// light_platform_get_time_since_init() and light_platform_sleep_ms() are declared. Including
+// that header directly is not the way in -- it depends on types light.h establishes first.
 #include <light.h>
-#include <light_platform.h>
 
 #include <stdint.h>
 
